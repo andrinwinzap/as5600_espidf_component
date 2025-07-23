@@ -15,5 +15,5 @@ This is an ESP-IDF driver for the AS5600 magnetic rotary encoder using I²C.
 
 ```bash
 cd your-esp-idf-project
-git submodule add https://github.com/yourusername/esp-idf-as5600.git components/as5600
+git submodule add https://github.com/andrinwinzap/as5600_espidf_component.git components/as5600
 ```
