@@ -1,0 +1,6 @@
+name: "as5600"
+version: "0.1.0"
+description: "AS5600 magnetic encoder component for ESP-IDF"
+url: "https://github.com/andrinwinzap/as5600_espidf_component"
+dependencies:
+  idf: ">=5.4"
