@@ -53,7 +53,8 @@ static uint16_t read_12_bit(const as5600_t *as5600, uint8_t reg)
 static float get_raw_angle(as5600_t *as5600)
 {
     uint16_t raw = read_12_bit(as5600, AS5600_REG_RAW_ANGLE_MSB);
-    return (raw * 2.0f * M_PI) / 4096.0f;
+    float angle = (raw * 2.0f * M_PI) / 4096.0f; // Round to actual encoder resolution
+    return roundf(angle * 1000.0f) / 1000.0f;
 }
 
 static float offset = 0.0f;
