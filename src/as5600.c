@@ -59,10 +59,10 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     as5600->deadband = deadband;
     as5600->scale_factor = scale_factor;
     as5600->direction = (direction >= 0) ? 1 : -1;
-    as5600->position = 0;
     as5600->velocity = 0;
 
-    ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d", address, alpha, deadband, scale_factor, as5600->direction);
+    ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
+             address, alpha, deadband, scale_factor, as5600->direction);
 
     uint8_t status = read_8_bit(as5600, AS5600_REG_STATUS);
     if (status == 0xFF)
@@ -78,10 +78,16 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
 
     ESP_LOGI(TAG, "AS5600 magnet detected (status=0x%02X)", status);
 
-    as5600->raw_angle = get_raw_angle(as5600);
+    float raw_angle = get_raw_angle(as5600);
+
+    float signed_angle = (raw_angle > M_PI) ? (raw_angle - 2.0f * M_PI) : raw_angle;
+
+    as5600->raw_angle = raw_angle;
+    as5600->position = signed_angle * as5600->scale_factor * as5600->direction;
     as5600->last_time_us = esp_timer_get_time();
 
-    ESP_LOGI(TAG, "AS5600 init done. Initial angle: %.6f rad", as5600->raw_angle);
+    ESP_LOGI(TAG, "AS5600 init done. Raw angle: %.6f rad, signed: %.6f rad, position: %.6f (scaled)",
+             raw_angle, signed_angle, as5600->position);
 
     return true;
 }
