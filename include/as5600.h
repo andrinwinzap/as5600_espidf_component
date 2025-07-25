@@ -17,13 +17,14 @@ typedef struct
     float alpha;
     float deadband;
     float scale_factor;
+    int8_t direction;
     float raw_angle;
     float position;
     int64_t last_time_us;
     float velocity;
 } as5600_t;
 
-bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor);
+bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction);
 void as5600_update(as5600_t *as5600);
 void as5600_set_position(as5600_t *as5600, float angle);
 float as5600_get_position(const as5600_t *as5600);

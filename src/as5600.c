@@ -51,17 +51,18 @@ static float get_raw_angle(as5600_t *as5600)
     return (raw * 2.0f * M_PI) / 4096.0f;
 }
 
-bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor)
+bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction)
 {
     as5600->i2c_port = i2c_port;
     as5600->address = address;
     as5600->alpha = alpha;
     as5600->deadband = deadband;
     as5600->scale_factor = scale_factor;
+    as5600->direction = (direction >= 0) ? 1 : -1;
     as5600->position = 0;
     as5600->velocity = 0;
 
-    ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f", address, alpha, deadband, scale_factor);
+    ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d", address, alpha, deadband, scale_factor, as5600->direction);
 
     uint8_t status = read_8_bit(as5600, AS5600_REG_STATUS);
     if (status == 0xFF)
@@ -95,6 +96,8 @@ void as5600_update(as5600_t *as5600)
         delta -= 2.0f * M_PI;
     else if (delta < -M_PI)
         delta += 2.0f * M_PI;
+
+    delta *= as5600->direction;
 
     as5600->position += delta;
 
