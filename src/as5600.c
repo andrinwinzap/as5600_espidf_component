@@ -123,7 +123,7 @@ static esp_err_t load_offset_from_nvs(float *value)
     return err;
 }
 
-bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction)
+bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction, bool enable_nvs)
 {
     as5600->i2c_port = i2c_port;
     as5600->address = address;
@@ -132,6 +132,7 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     as5600->scale_factor = scale_factor;
     as5600->direction = (direction >= 0) ? 1 : -1;
     as5600->velocity = 0;
+    as5600->enable_nvs = enable_nvs;
 
     ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
              address, alpha, deadband, scale_factor, as5600->direction);
@@ -154,11 +155,14 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     float signed_angle = (raw_angle > M_PI) ? (raw_angle - 2.0f * M_PI) : raw_angle;
 
     // Load saved offset from NVS
-    if (load_offset_from_nvs(&offset) != ESP_OK)
+    if (!as5600->enable_nvs || load_offset_from_nvs(&offset) != ESP_OK)
     {
         offset = 0.0f;
     }
-    ESP_LOGI(TAG, "Loaded offset from NVS: %.6f rad", offset);
+    else
+    {
+        ESP_LOGI(TAG, "Loaded offset from NVS: %.6f rad", offset);
+    }
 
     // Apply offset to initial position
     float corrected_angle = signed_angle - offset;
@@ -220,14 +224,17 @@ void as5600_set_position(as5600_t *as5600, float angle)
         offset += 2.0f * M_PI;
 
     // Save to NVS
-    esp_err_t err = save_offset_to_nvs(offset);
-    if (err == ESP_OK)
+    if (as5600->enable_nvs)
     {
-        ESP_LOGI(TAG, "Saved offset %.6f rad to NVS", offset);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to save offset to NVS");
+        esp_err_t err = save_offset_to_nvs(offset);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Saved offset %.6f rad to NVS", offset);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to save offset to NVS");
+        }
     }
 
     // Update position with new offset applied
