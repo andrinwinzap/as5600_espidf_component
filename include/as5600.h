@@ -24,6 +24,8 @@ typedef struct
     float velocity;
     float zero_offset;
     bool enable_nvs;
+    char nvs_namespace[32];
+    float offset;
 } as5600_t;
 
 bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction, bool enable_nvs);

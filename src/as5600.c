@@ -6,7 +6,6 @@
 #include <string.h>
 
 static const char *TAG = "as5600";
-static const char *NVS_NAMESPACE = "as5600";
 static const char *NVS_KEY_OFFSET = "offset";
 
 static esp_err_t i2c_read_reg(const as5600_t *as5600, uint8_t reg, uint8_t *buf, size_t len)
@@ -57,69 +56,45 @@ static float get_raw_angle(as5600_t *as5600)
     return roundf(angle * 1000.0f) / 1000.0f;
 }
 
-static float offset = 0.0f;
+static void generate_nvs_namespace(as5600_t *as5600)
+{
+    snprintf(as5600->nvs_namespace, sizeof(as5600->nvs_namespace), "as5600_%d", as5600->i2c_port);
+}
 
-static esp_err_t save_offset_to_nvs(float value)
+esp_err_t save_offset_to_nvs(as5600_t *as5600)
 {
     nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    esp_err_t err = nvs_open(as5600->nvs_namespace, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "NVS open failed: %s", esp_err_to_name(err));
         return err;
-    }
-    uint32_t raw;
-    memcpy(&raw, &value, sizeof(float));
-    err = nvs_set_u32(nvs_handle, NVS_KEY_OFFSET, raw);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "NVS set offset failed: %s", esp_err_to_name(err));
-        nvs_close(nvs_handle);
-        return err;
-    }
-    err = nvs_commit(nvs_handle);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "NVS commit failed: %s", esp_err_to_name(err));
-    }
+    err = nvs_set_blob(nvs_handle, NVS_KEY_OFFSET, &as5600->offset, sizeof(as5600->offset));
+    if (err == ESP_OK)
+        err = nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
     return err;
 }
 
-static esp_err_t load_offset_from_nvs(float *value)
+esp_err_t load_offset_from_nvs(as5600_t *as5600)
 {
     nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
-    if (err == ESP_ERR_NVS_NOT_FOUND)
+    esp_err_t err = nvs_open(as5600->nvs_namespace, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK)
     {
-        ESP_LOGI(TAG, "NVS namespace not found, no offset saved yet");
-        *value = 0.0f;
-        return ESP_OK; // Treat as success with default offset
+        if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            as5600->offset = 0.0f;
+            return ESP_OK;
+        }
+        return err;
     }
-    else if (err != ESP_OK)
-    {
-        ESP_LOGW(TAG, "NVS open failed: %s", esp_err_to_name(err));
-        *value = 0.0f;
-        return err; // Other errors propagate
-    }
-
-    uint32_t raw = 0;
-    err = nvs_get_u32(nvs_handle, NVS_KEY_OFFSET, &raw);
-    if (err == ESP_ERR_NVS_NOT_FOUND)
-    {
-        ESP_LOGI(TAG, "No saved offset found");
-        *value = 0.0f;
-        err = ESP_OK; // no saved offset, but still success
-    }
-    else if (err == ESP_OK)
-    {
-        memcpy(value, &raw, sizeof(float));
-    }
-    else
-    {
-        ESP_LOGE(TAG, "NVS get offset failed: %s", esp_err_to_name(err));
-    }
+    size_t required_size = sizeof(as5600->offset);
+    err = nvs_get_blob(nvs_handle, NVS_KEY_OFFSET, &as5600->offset, &required_size);
     nvs_close(nvs_handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
+        as5600->offset = 0.0f;
+        return ESP_OK;
+    }
     return err;
 }
 
@@ -133,6 +108,7 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     as5600->direction = (direction >= 0) ? 1 : -1;
     as5600->velocity = 0;
     as5600->enable_nvs = enable_nvs;
+    as5600->offset = 0;
 
     ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
              address, alpha, deadband, scale_factor, as5600->direction);
@@ -154,18 +130,25 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     float raw_angle = get_raw_angle(as5600);
     float signed_angle = (raw_angle > M_PI) ? (raw_angle - 2.0f * M_PI) : raw_angle;
 
-    // Load saved offset from NVS
-    if (!as5600->enable_nvs || load_offset_from_nvs(&offset) != ESP_OK)
+    if (as5600->enable_nvs)
     {
-        offset = 0.0f;
+        generate_nvs_namespace(as5600);
+        if (load_offset_from_nvs(as5600) != ESP_OK)
+        {
+            as5600->offset = 0.0f;
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Loaded offset from NVS: %.6f rad", as5600->offset);
+        }
     }
     else
     {
-        ESP_LOGI(TAG, "Loaded offset from NVS: %.6f rad", offset);
+        as5600->offset = 0.0f;
     }
 
     // Apply offset to initial position
-    float corrected_angle = signed_angle - offset;
+    float corrected_angle = signed_angle - as5600->offset;
     if (corrected_angle > M_PI)
         corrected_angle -= 2.0f * M_PI;
     else if (corrected_angle < -M_PI)
@@ -215,21 +198,21 @@ void as5600_set_position(as5600_t *as5600, float angle)
 {
     // Save offset = current raw_angle - desired zero position (in radians)
     float raw_angle = get_raw_angle(as5600);
-    offset = raw_angle - angle;
+    as5600->offset = raw_angle - angle;
 
     // Wrap offset to [-pi, pi]
-    if (offset > M_PI)
-        offset -= 2.0f * M_PI;
-    else if (offset < -M_PI)
-        offset += 2.0f * M_PI;
+    if (as5600->offset > M_PI)
+        as5600->offset -= 2.0f * M_PI;
+    else if (as5600->offset < -M_PI)
+        as5600->offset += 2.0f * M_PI;
 
     // Save to NVS
     if (as5600->enable_nvs)
     {
-        esp_err_t err = save_offset_to_nvs(offset);
+        esp_err_t err = save_offset_to_nvs(as5600);
         if (err == ESP_OK)
         {
-            ESP_LOGI(TAG, "Saved offset %.6f rad to NVS", offset);
+            ESP_LOGI(TAG, "Saved offset %.6f rad to NVS", as5600->offset);
         }
         else
         {
