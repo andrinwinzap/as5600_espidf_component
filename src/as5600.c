@@ -5,7 +5,6 @@
 #include "nvs.h"
 #include <string.h>
 
-static const char *TAG = "as5600";
 static const char *NVS_KEY_OFFSET = "offset";
 
 static esp_err_t i2c_read_reg(const as5600_t *as5600, uint8_t reg, uint8_t *buf, size_t len)
@@ -32,7 +31,7 @@ static uint8_t read_8_bit(const as5600_t *as5600, uint8_t reg)
     uint8_t b;
     if (i2c_read_reg(as5600, reg, &b, 1) != ESP_OK)
     {
-        ESP_LOGE(TAG, "I2C read_8_bit failed");
+        ESP_LOGE(as5600->tag, "I2C read_8_bit failed");
         return 0xFF;
     }
     return b;
@@ -43,7 +42,7 @@ static uint16_t read_12_bit(const as5600_t *as5600, uint8_t reg)
     uint8_t buf[2];
     if (i2c_read_reg(as5600, reg, buf, 2) != ESP_OK)
     {
-        ESP_LOGE(TAG, "I2C read_12_bit failed");
+        ESP_LOGE(as5600->tag, "I2C read_12_bit failed");
         return 0;
     }
     return ((uint16_t)buf[0] << 8 | buf[1]) & 0x0FFF;
@@ -56,15 +55,15 @@ static float get_raw_angle(as5600_t *as5600)
     return roundf(angle * 1000.0f) / 1000.0f;
 }
 
-static void generate_nvs_namespace(as5600_t *as5600)
+static void generate_tag(as5600_t *as5600)
 {
-    snprintf(as5600->nvs_namespace, sizeof(as5600->nvs_namespace), "as5600_%d", as5600->i2c_port);
+    snprintf(as5600->tag, sizeof(as5600->tag), "as5600_%d", as5600->i2c_port);
 }
 
 esp_err_t save_offset_to_nvs(as5600_t *as5600)
 {
     nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(as5600->nvs_namespace, NVS_READWRITE, &nvs_handle);
+    esp_err_t err = nvs_open(as5600->tag, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK)
         return err;
     err = nvs_set_blob(nvs_handle, NVS_KEY_OFFSET, &as5600->offset, sizeof(as5600->offset));
@@ -77,7 +76,7 @@ esp_err_t save_offset_to_nvs(as5600_t *as5600)
 esp_err_t load_offset_from_nvs(as5600_t *as5600)
 {
     nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(as5600->nvs_namespace, NVS_READONLY, &nvs_handle);
+    esp_err_t err = nvs_open(as5600->tag, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK)
     {
         if (err == ESP_ERR_NVS_NOT_FOUND)
@@ -110,41 +109,35 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     as5600->enable_nvs = enable_nvs;
     as5600->offset = 0;
 
-    ESP_LOGI(TAG, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
+    generate_tag(as5600);
+
+    ESP_LOGI(as5600->tag, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
              address, alpha, deadband, scale_factor, as5600->direction);
 
     uint8_t status = read_8_bit(as5600, AS5600_REG_STATUS);
     if (status == 0xFF)
     {
-        ESP_LOGE(TAG, "AS5600 I2C read failed (status 0xFF)");
+        ESP_LOGE(as5600->tag, "AS5600 I2C read failed (status 0xFF)");
         return false;
     }
     if ((status & (1 << 5)) == 0)
     {
-        ESP_LOGE(TAG, "AS5600 magnet not detected (status=0x%02X)", status);
+        ESP_LOGE(as5600->tag, "AS5600 magnet not detected (status=0x%02X)", status);
         return false;
     }
 
-    ESP_LOGI(TAG, "AS5600 magnet detected (status=0x%02X)", status);
+    ESP_LOGI(as5600->tag, "AS5600 magnet detected (status=0x%02X)", status);
 
     float raw_angle = get_raw_angle(as5600);
     float signed_angle = (raw_angle > M_PI) ? (raw_angle - 2.0f * M_PI) : raw_angle;
 
-    if (as5600->enable_nvs)
+    if (!as5600->enable_nvs || load_offset_from_nvs(as5600) != ESP_OK)
     {
-        generate_nvs_namespace(as5600);
-        if (load_offset_from_nvs(as5600) != ESP_OK)
-        {
-            as5600->offset = 0.0f;
-        }
-        else
-        {
-            ESP_LOGI(TAG, "Loaded offset from NVS: %.6f rad", as5600->offset);
-        }
+        as5600->offset = 0.0f;
     }
     else
     {
-        as5600->offset = 0.0f;
+        ESP_LOGI(as5600->tag, "Loaded offset from NVS: %.6f rad", as5600->offset);
     }
 
     // Apply offset to initial position
@@ -158,7 +151,7 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
     as5600->position = corrected_angle * as5600->scale_factor * as5600->direction;
     as5600->last_time_us = esp_timer_get_time();
 
-    ESP_LOGI(TAG, "AS5600 init done. Raw angle: %.6f rad, signed: %.6f rad, corrected pos: %.6f (scaled)",
+    ESP_LOGI(as5600->tag, "AS5600 init done. Raw angle: %.6f rad, signed: %.6f rad, corrected pos: %.6f (scaled)",
              raw_angle, signed_angle, as5600->position);
 
     return true;
@@ -212,11 +205,11 @@ void as5600_set_position(as5600_t *as5600, float angle)
         esp_err_t err = save_offset_to_nvs(as5600);
         if (err == ESP_OK)
         {
-            ESP_LOGI(TAG, "Saved offset %.6f rad to NVS", as5600->offset);
+            ESP_LOGI(as5600->tag, "Saved offset %.6f rad to NVS", as5600->offset);
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to save offset to NVS");
+            ESP_LOGE(as5600->tag, "Failed to save offset to NVS");
         }
     }
 
@@ -224,7 +217,7 @@ void as5600_set_position(as5600_t *as5600, float angle)
     as5600->position = angle * as5600->scale_factor;
     as5600->raw_angle = raw_angle;
 
-    ESP_LOGI(TAG, "Set position to %.6f rad (scaled: %.6f), raw_angle: %.6f", angle, as5600->position, raw_angle);
+    ESP_LOGI(as5600->tag, "Set position to %.6f rad (scaled: %.6f), raw_angle: %.6f", angle, as5600->position, raw_angle);
 }
 
 float as5600_get_position(const as5600_t *as5600)

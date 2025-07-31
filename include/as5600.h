@@ -24,7 +24,7 @@ typedef struct
     float velocity;
     float zero_offset;
     bool enable_nvs;
-    char nvs_namespace[32];
+    char tag[16];
     float offset;
 } as5600_t;
 
