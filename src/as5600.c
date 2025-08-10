@@ -97,14 +97,14 @@ esp_err_t load_offset_from_nvs(as5600_t *as5600)
     return err;
 }
 
-bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, int8_t direction, bool enable_nvs)
+bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, bool invert_direction, bool enable_nvs)
 {
     as5600->i2c_port = i2c_port;
     as5600->address = address;
     as5600->alpha = alpha;
     as5600->deadband = deadband;
     as5600->scale_factor = scale_factor;
-    as5600->direction = (direction >= 0) ? 1 : -1;
+    as5600->direction = invert_direction ? -1 : 1;
     as5600->velocity = 0;
     as5600->enable_nvs = enable_nvs;
     as5600->offset = 0;
