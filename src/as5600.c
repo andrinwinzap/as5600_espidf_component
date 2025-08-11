@@ -97,22 +97,19 @@ esp_err_t load_offset_from_nvs(as5600_t *as5600)
     return err;
 }
 
-bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float alpha, float deadband, float scale_factor, bool invert_direction, bool enable_nvs)
+bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float scale_factor, bool invert_direction, bool enable_nvs)
 {
     as5600->i2c_port = i2c_port;
     as5600->address = address;
-    as5600->alpha = alpha;
-    as5600->deadband = deadband;
     as5600->scale_factor = scale_factor;
     as5600->direction = invert_direction ? -1 : 1;
-    as5600->velocity = 0;
     as5600->enable_nvs = enable_nvs;
     as5600->offset = 0;
 
     generate_tag(as5600);
 
-    ESP_LOGI(as5600->tag, "Initializing AS5600: addr=0x%02X, alpha=%.3f, deadband=%.5f, scale=%.3f, direction=%d",
-             address, alpha, deadband, scale_factor, as5600->direction);
+    ESP_LOGI(as5600->tag, "Initializing AS5600: addr=0x%02X, scale=%f, direction=%d",
+             address, scale_factor, as5600->direction);
 
     uint8_t status = read_8_bit(as5600, AS5600_REG_STATUS);
     if (status == 0xFF)
@@ -149,7 +146,6 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float a
 
     as5600->raw_angle = raw_angle;
     as5600->position = corrected_angle * as5600->scale_factor * as5600->direction;
-    as5600->last_time_us = esp_timer_get_time();
 
     ESP_LOGI(as5600->tag, "AS5600 init done. Raw angle: %.6f rad, signed: %.6f rad, corrected pos: %.6f (scaled)",
              raw_angle, signed_angle, as5600->position);
@@ -172,19 +168,7 @@ void as5600_update(as5600_t *as5600)
 
     as5600->position += delta;
 
-    float dt = (now_us - as5600->last_time_us) / 1e6f;
-    if (dt > 0)
-    {
-        float raw_velocity = delta / dt;
-
-        if (fabsf(raw_velocity) < as5600->deadband)
-            raw_velocity = 0.0f;
-
-        as5600->velocity = as5600->alpha * raw_velocity + (1.0f - as5600->alpha) * as5600->velocity;
-    }
-
     as5600->raw_angle = current;
-    as5600->last_time_us = now_us;
 }
 
 void as5600_set_position(as5600_t *as5600, float angle)
@@ -223,11 +207,6 @@ void as5600_set_position(as5600_t *as5600, float angle)
 float as5600_get_position(const as5600_t *as5600)
 {
     return as5600->position / as5600->scale_factor;
-}
-
-float as5600_get_velocity(const as5600_t *as5600)
-{
-    return as5600->velocity / as5600->scale_factor;
 }
 
 bool as5600_magnet_detected(const as5600_t *as5600)
