@@ -37,22 +37,31 @@ static uint8_t read_8_bit(const as5600_t *as5600, uint8_t reg)
     return b;
 }
 
-static uint16_t read_12_bit(const as5600_t *as5600, uint8_t reg)
+static esp_err_t read_12_bit(const as5600_t *as5600, uint8_t reg, uint16_t *out_value)
 {
     uint8_t buf[2];
-    if (i2c_read_reg(as5600, reg, buf, 2) != ESP_OK)
-    {
-        ESP_LOGE(as5600->tag, "I2C read_12_bit failed");
-        return 0;
+    esp_err_t err = i2c_read_reg(as5600, reg, buf, 2);
+    if (err != ESP_OK) {
+        ESP_LOGE(as5600->tag, "I2C read_12_bit failed: %s", esp_err_to_name(err));
+        return err;
     }
-    return ((uint16_t)buf[0] << 8 | buf[1]) & 0x0FFF;
+
+    *out_value = ((uint16_t)buf[0] << 8 | buf[1]) & 0x0FFF;
+    return ESP_OK;
 }
 
-static float get_raw_angle(as5600_t *as5600)
+static esp_err_t get_raw_angle(as5600_t *as5600, float *angle)
 {
-    uint16_t raw = read_12_bit(as5600, AS5600_REG_RAW_ANGLE_MSB);
-    float angle = (raw * 2.0f * M_PI) / 4096.0f; // Round to actual encoder resolution
-    return roundf(angle * 1000.0f) / 1000.0f;
+    uint16_t raw;
+    esp_err_t err = read_12_bit(as5600, AS5600_REG_RAW_ANGLE_MSB, &raw);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    float a = (raw * 2.0f * M_PI) / 4096.0f;
+    *angle = roundf(a * 1000.0f) / 1000.0f;
+
+    return ESP_OK;
 }
 
 static void generate_tag(as5600_t *as5600)
@@ -125,7 +134,11 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float s
 
     ESP_LOGI(as5600->tag, "AS5600 magnet detected (status=0x%02X)", status);
 
-    float raw_angle = get_raw_angle(as5600);
+    float raw_angle;
+     if (get_raw_angle(as5600, &raw_angle) != ESP_OK) {
+        ESP_LOGE(as5600->tag, "Failed to get raw angle");
+        return false;
+    }
     float signed_angle = (raw_angle > M_PI) ? (raw_angle - 2.0f * M_PI) : raw_angle;
 
     if (!as5600->enable_nvs || load_offset_from_nvs(as5600) != ESP_OK)
@@ -155,8 +168,12 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float s
 
 void as5600_update(as5600_t *as5600)
 {
-    float current = get_raw_angle(as5600);
-    int64_t now_us = esp_timer_get_time();
+    float current;
+    if (get_raw_angle(as5600, &current) != ESP_OK) {
+        // skip update if we couldn’t read
+        return;
+    }
+
     float delta = current - as5600->raw_angle;
 
     if (delta > M_PI)
@@ -167,14 +184,16 @@ void as5600_update(as5600_t *as5600)
     delta *= as5600->direction;
 
     as5600->position += delta;
-
     as5600->raw_angle = current;
 }
 
 void as5600_set_position(as5600_t *as5600, float angle)
 {
     // Save offset = current raw_angle - desired zero position (in radians)
-    float raw_angle = get_raw_angle(as5600);
+    float raw_angle;
+     if (get_raw_angle(as5600, &raw_angle) != ESP_OK) {
+        ESP_LOGE(as5600->tag, "Failed to get raw angle");
+    }
     as5600->offset = raw_angle - angle;
 
     // Wrap offset to [-pi, pi]
