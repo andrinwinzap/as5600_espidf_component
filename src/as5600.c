@@ -166,12 +166,11 @@ bool as5600_init(as5600_t *as5600, i2c_port_t i2c_port, uint8_t address, float s
     return true;
 }
 
-void as5600_update(as5600_t *as5600)
+bool as5600_update(as5600_t *as5600)
 {
     float current;
     if (get_raw_angle(as5600, &current) != ESP_OK) {
-        // skip update if we couldn’t read
-        return;
+        return false;
     }
 
     float delta = current - as5600->raw_angle;
@@ -185,6 +184,7 @@ void as5600_update(as5600_t *as5600)
 
     as5600->position += delta;
     as5600->raw_angle = current;
+    return true;
 }
 
 void as5600_set_position(as5600_t *as5600, float angle)
